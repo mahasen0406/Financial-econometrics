@@ -1,0 +1,488 @@
+---
+title: "Modelling for energy asset return volatility accounting for structural breaks: GARCH, EGARCH and TGARCH approach \n \\vspace{2in} "
+subtitle: "ETW3481 - Assignment 1"
+author: "Naveen Mahasen Weerasinghe (32761899)\n \\vspace{1in} "
+date: ""
+bibliography: Bibliography.bib
+csl: apa.csl
+link-citations: yes
+linkcolor: blue
+output:
+  bookdown::pdf_book:
+    toc: no
+    number_sections: true
+    fig_caption: yes
+urlcolor: blue
+editor_options:
+  chunk_output_type: console
+fontsize: 12pt
+header-includes:
+  - \usepackage{titling}
+  - \pretitle{\begin{center}
+    \includegraphics[width=2in,height=2in]{logo.png}\LARGE\\}
+  - \posttitle{\end{center}}
+  - \usepackage{setspace}
+  - \onehalfspacing
+  - \counterwithin{figure}{section}
+  - \usepackage{caption}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, fig.cap = T)
+```
+
+\newpage
+
+```{=latex}
+\setcounter{tocdepth}{4}
+\tableofcontents
+```
+\newpage
+
+```{r include=FALSE}
+library(fpp2)
+library(tidyverse)
+library(forecast)
+library(quantmod)
+library(rugarch)
+library(urca)
+library(tseries)
+library(fBasics)
+library(stargazer)
+```
+
+# Introduction and the preliminary analysis
+
+## Introduction to data
+
+The data used for the assignment are adjusted daily closing indexes on the **European Renewable Energy Index(ERIX)** and the **S&P Global Clean Energy Index(SPG)**. It includes daily data from 22.09.2003 till 31.12.2021 from the ERIX and daily data from 21.11.2003 till 31.12.2021 in SPG. The data have been collected from the Bloomberg dataset and the time-frame is dependent on the availability of data.
+
++---------------------------------------+-----------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------+
+| Index                                 | Definition                                                                                                                  | Source                                                                                                                 |
++:======================================+:============================================================================================================================+:=======================================================================================================================+
+| European Renewable energy index(ERIX) | The index tracks down the performance of European renewable                                                                 | The main source of the index is "Societe Generale" that has connected with S&P Opco to maintain and compute the index. |
+|                                       |                                                                                                                             |                                                                                                                        |
+|                                       | energy companies that are actively participating in one or more of the clusters mentioned below:                            | The index is always re-balanced every quarter and the review takes place every 6 months                                |
+|                                       |                                                                                                                             |                                                                                                                        |
+|                                       | Biofuels, Geothermal, Marine, Solar, Water, and Wind                                                                        |                                                                                                                        |
++---------------------------------------+-----------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------+
+| S&P Global Clean Energy Index(SPG)    | The index is designed to measure the performance of 100 biggest companies determined by the market capitalization in global | Index is one of the S&P DOW JOHNS indices. The S&P500 always has a target component of 100 companies.                  |
+|                                       |                                                                                                                             |                                                                                                                        |
+|                                       | clean-energy related business from both developing and developed markets, with target component count of 100.               |                                                                                                                        |
++---------------------------------------+-----------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------+
+
+: Description of data
+
+## Features of the Data {#sec1}
+
+The features of the data can be explained using **asymmetry**, **volatility** **clustering** and **heavy-tailness**. We will conduct the preliminary assesment of the data using the following graphs.
+
+```{r Preliminary Assesment, include=FALSE, paged.print=TRUE}
+#Import data
+erix <- read.delim("erix.txt", header=TRUE)
+spg <- read.delim("spg.txt", header=TRUE)
+
+#Returns
+erix_ret <- 100*diff(log(erix[,2]))
+spg_ret <- 100*diff(log(spg[,2]))
+
+erix_ret <- ts(erix_ret)
+spg_ret <- ts(spg_ret)
+
+par(mfrow=c(2,1))
+plot(as.ts(log(erix[,2])), col="blue", ylab="Log-price", main="ERIX index")
+grid()
+plot(erix_ret, col="blue", ylab="Log-price", main="ERIX returns")
+grid()
+
+par(mfrow=c(2,1))
+plot(as.ts(log(spg[,2])), col="blue", ylab="Log-price", main="SPG index")
+grid()
+plot(spg_ret, col="blue", ylab="Log-price", main="SPG returns")
+grid()
+```
+
+<p>
+
+![ERIX plots of log-returns and log-series](Screenshot%202023-08-26%20at%201.22.27%20PM.png){width="400"}
+
+</p>
+
+<p>
+
+![SPG plots of log-returns and log-series](Screenshot%202023-08-26%20at%201.49.58%20PM.png){width="400"}
+
+</p>
+
+**Asymmetry** in financial data is that when the returns are negative, the volatility is high. As seen in both figures mentioned we can see that as the returns turn to negative there is high volatility. In the ERIX series this can be seen between time 1000-1500 whereas it can be seen in SPG at the same time as well as after 4000.
+
+**Volatility clustering** refers to situations where large changes in asset prices will cluster together which leads to varying volatility over time. In the context of ERIX returns, there is a volatility cluster during the observations between 1000 and 1500 which leads to changing volatility afterwards. Another clustering can be seen right after 2000 and 3000. The small volatile clusters tend to be clustered together. Around 4500 there is another volatility cluster. Considering the SPG return, there is a high volatility cluster at the same time as ERIX between 1000 adn 1500 then another one right after 2000 and 3000. Again there is a volatility cluster around 4500 of the observations.
+
+The **heavy-tailness** of the both ERIX and SPG returns can be seen using the retuns plot. The heavy tailness in financial series refers to the large deviation from the mean in the data. As can be seen in multiple occation mentioned above, there are high volatility periods where the the data deviates from the mean at a high rate. Hence, we can say that in both ERIX and SPG returns series there is heavy-tailness present. We can see heavy-tailness better using the empirical density plot where we will compare and contrast it to a normal distribution. Next we will look at the summary statistics of the both log-returns.
+
+## Summary statistics of the data
+
+The summary statistics of the two log-return series can be seen below,
+
++--------------+-------+--------------------+----------+-----------------+---------+-----------+
+| Index        | Mean  | Standard Deviation | Skewness | Excess Kurtosis | Minimum | Maximum   |
++:============:+:=====:+:==================:+:========:+:===============:+:=======:+:=========:+
+| ERIX returns | 0.034 | 1.829              | -0.544   | 7.361           | -14.989 | 14.588    |
++--------------+-------+--------------------+----------+-----------------+---------+-----------+
+| SPG retuns   | 0.006 | 1.799              | -0.604   | 13.351          | -14.973 | 18.092    |
++--------------+-------+--------------------+----------+-----------------+---------+-----------+
+
+: Summary statistics for ERIX returns and SPG returns
+
+```{r include=FALSE}
+basicStats(erix_ret)
+basicStats(spg_ret)
+```
+
+According to the table, the summary statistics show that the averages are smaller compared to the standard deviations of the daily returns. Both show positive means and negative skewness. Considering both daily returns with a positive excess kurtosis they seem to be leptokurtic. This shows that both daily returns series have a higher peak than a normal distribution which also confirms the heavy-tailness of the data series. The minimum of both returns show similar values whereas SPG returns have a slightly higher maximum. Although the maximum of SPG returns is high we notice that there is a higher deviation in ERIX returns than SPG returns which is evident from the standard deviation computation. This is also confirmed by the high variance in ERIX returns than SPG returns when compared with the plots.
+
+This evidence concludes that both series have high volatility and does not follow a normal distribution due to significant excess kurtosis. In order to confirm the normality we will create empirical density plots and run normality tests.
+
+## Test of Normality and mean of zero
+
+In order to see the normality we can plot an empirical density plot as below in figure \@ref(fig:fig1) and \@ref(fig:fig2),
+
+```{r fig1, echo=FALSE, out.width = "90%", out.height="110%", fig.align = "center", fig.cap='Empirical density plot of ERIX returns'}
+par(mfrow=c(1,1))
+d1=density(erix_ret, na.rm = TRUE)
+plot(d1$x,d1$y,type='l',xlab='return',ylab='density',main="Empirical density of 
+     ERIX returns", las=1)
+mu=mean(erix_ret, na.rm = TRUE); s1 = sd(erix_ret, na.rm = TRUE)
+# above line computes the sample mean and standard deviation of Mirosoft simple returns.
+x=seq(min(erix_ret, na.rm = TRUE), max(erix_ret, na.rm = TRUE), 0.01) 
+# above line creates a sequence of real numbers from -min to max of simple net return with increment 0.01.
+y=dnorm(x,mean=mu,sd=s1) 
+# obtain normal density with mean mu and standard deviation s1.
+lines(x,y,lty=2, col="red")
+```
+
+```{r fig2, echo=FALSE, out.width = "90%", out.height="110%", fig.align = "center", fig.cap='Empirical density plot of SPG returns'}
+par(mfrow=c(1,1))
+d1=density(spg_ret, na.rm = TRUE)
+plot(d1$x,d1$y,type='l',xlab='return',ylab='density',main="Empirical density of 
+     SPG returns", las=1)
+mu=mean(spg_ret, na.rm = TRUE); s1 = sd(spg_ret, na.rm = TRUE)
+# above line computes the sample mean and standard deviation of Mirosoft simple returns.
+x=seq(min(spg_ret, na.rm = TRUE), max(spg_ret, na.rm = TRUE), 0.01) 
+# above line creates a sequence of real numbers from -min to max of simple net return with increment 0.01.
+y=dnorm(x,mean=mu,sd=s1) 
+# obtain normal density with mean mu and standard deviation s1.
+lines(x,y,lty=2, col="red")
+```
+
+Both graphs show higher peaks than the normal distribution (red line) and show a positive excess kurtosis. Furthermore, the distribution show that the tails are heavier in the series than the normal distribution in both graphs that show the heavy-tailness of the data referring back to section \@ref(sec1). In order to confirm the normality we will run the normality test(Jarque-Bera normality test) as below.
+
+```{r include=FALSE}
+normalTest(erix_ret,method="jb", na.rm=TRUE)
+normalTest(spg_ret,method="jb", na.rm=TRUE)
+```
+\newpage
+$$H_0:There~exists~normality$$
+$$H_1:The~data~series~do~not~follow~a~normal~distribution$$
+We will use the P-value in order to determine if we reject the $H_0$ or not.
+
+The p-values for both daily series are $< 2.2e-16$ which show that under the 5% confidence interval we can reject the $H_0$ since $(0.05>[< 2.2e-16])$ and conclude that both series **do not** follow a normal distribution.
+
+Next we will run a normal t-test to test whether the mean of both log returns are zero. The null hypothesis and alternative hypothesis for both $i$ is given below,
+
+$$H_0:E(r_{ERIXt})=0$$
+$$H_a:E(r_{ERIXt})\neq0$$
+$$H_0:E(r_{SPGt})=0$$
+$$H_a:E(r_{SPGt})\neq0$$
+```{r eval=FALSE, include=FALSE}
+t.test(erix_ret)
+t.test(spg_ret)
+```
+
+According to the sample t-test run in R, the p-values for both tests are $0.1954$ and $0.8063$ respectively. Since both p-values are $>0.05$ we can not reject the null hypothesis of $E(r_{it})=0~where~i=ERIX,SPG$. Hence we can state that there is no significant evidence to suggest that the expected value of both series are significantly different from 0.
+
+## Test for autocorrelation
+
+Autocorrelation is the correlation between the daily returns and its lag values. We will run the ljung-box test to see whether the log-returns and log-returns squared. Both will take the same test hypothesis and alternative hypothesis as below for 10 lags.
+
+$$H_0:\rho_1=\rho_2=...=\rho_{10}=0$$
+$$H_a:\rho_i \neq0~where~0\leq i \leq 10$$
+```{r eval=FALSE, include=FALSE}
+Box.test(erix_ret, lag = 10, type = c("Ljung-Box"))
+Box.test(spg_ret, lag = 10, type = c("Ljung-Box"))
+Box.test(erix_ret^2, lag = 10, type = c("Ljung-Box"))
+Box.test(spg_ret^2, lag = 10, type = c("Ljung-Box"))
+```
+
+The P-value for ERIX daily log returns is **0.00025** and the p-value for SPG daily log returns is **< 2.2e-16**. Since both are $< 0.05$ we can **reject** the null hypothesis and conclude that there is autocorrelation in both daily log-returns.
+
+The P-value for ERIX squared daily log returns is **0.00025** and the p-value for SPG daily log returns is **< 2.2e-16**. Since both are $< 0.05$ we can **reject** the null hypothesis and conclude that there is autocorrelation in both daily log-returns. Furthermore, when squaring the daily log returns, the variances will be magnified and the autocorrelation function will be more sensitive. After running the test we receive the p-values of each test for ERIX returns squared and SPG returns squared as **< 2.2e-16** for both. It shows that the p-value has reduced from the normal series to the squared series. In the squared log-returns autocorrelation tests, since both are $< 0.05$ we can **reject** the null hypothesis and conclude that there is autocorrelation in both daily squared log-returns. Hence, we will conclude that both the log-returns and squared log-returns for both series have **autocorrelation**.
+\newpage
+
+# Model Estimation and adequacy tests
+
+## Model estimation and the adequecy tests
+
+To model both daily log returns of ERIX and SPG indices, we will use the models of GARCH(1,1), GJR-GARCH(1,1) and EGARCH(1,1) with the mean equation of the AR(1) process. The model specifications are given below;
+
+**AR(1) mean equation for all models:**
+\begin{equation}\label{eq:1}
+r_t=\mu+\phi_1r_{t-1}+u_t
+\end{equation}
+where $u_t \sim N(0,\sigma^2_t)$
+
+**AR(1)-GARCH(1,1) model:**
+Model specification includes both AR(1) model from equation \@ref(eq:1) and,
+\begin{equation}\label{eq:2}
+\sigma_t^2=\omega+\alpha_1u^2_{t-1}+\beta_1\sigma^2_{t-1}
+\end{equation}
+**AR(1)-GJR-GARCH(1,1) model:**
+Model specification includes both AR(1) model from equation \@ref(eq:1) and,
+\begin{equation}\label{eq:3}
+\sigma_t^2=\omega+\alpha_1u^2_{t-1}+\beta_1\sigma^2_{t-1}+\gamma_1u^2_{t-1}I_{t-1}
+\end{equation}
+**AR(1)-EGARCH(1,1) model:**
+Model specification for EGARCH mentioned by @nelson_conditional_1991 used for the analysis by R includes both AR(1) model from equation \@ref(eq:1) and,
+\begin{equation}\label{eq:4}
+ln_e(\sigma_t^2)= \left(\omega+\sum_{j=1}^m\varsigma_j\upsilon_{jt} \right)\sum_{j=1}^q(\alpha_jz_{t-j}+\gamma_j(|z_{t-j}|-E(|z_{t-j}|))+\sum_{j=1}^p\beta_jlog_e(\sigma^2_{t-j})
+\end{equation}
+Where 
+$$E(|z_t|)=\int_{-\infty}^{\infty}|z|f(z,0,1,...)dz$$
+The parameter estimates of GARCH(1,1), GJR-GARCH(1,1) and EGARCH(1,1) for both daily log-returns are summarized in table \@ref(tab:Table) below. The GARCH(1,1) models for both volatility effects and is simple while both GJR-GARCH and EGARCH models for the volatility effects and asymmetry effects noted by $(\gamma_i)$ notation. In the model estimates, the $Q(10)$ and $Q^2(10)$ refers to the p-values of the ljung-box test for the autocorrelation of residuals of the model and squared residuals of the model(Refer to table \@ref(tab:Table)). This is done as model diagnostics to see if the model residuals are autocorrelated to each of the lags. The diagnostics for all 6 models show that the p-values are >0.05 and we cannot reject the null hypothesis of that the $\rho_i=0$ (where $1\leq i \leq10$) are significant for model residuals and squared model residuals. Hence we can say that the model passes the adequacy tests and do not show spurious effects.
+
+### Estimated result analysis for ERIX index
+
+For ERIX returns, all the model parameters are are highly significant in all 3 models where the AIC information criterion are less than 4 for all where GJR-GARCH and EGARCH seems to be the best fits for the log-returns due to its ability to account for asymmetry in the data. Out of all the models, since the log-likelihood is highest for the EGARCH model it is the best fit for the data. When taking the **GARCH model** into account of the conditional variance terms $(\omega, \alpha_1, \beta_1)$, all the GARCH and ARCH parameters are positive and statistically significant at the 1% confidence level. Additionally, all the coefficients of the conditional variance specification meet the stability conditions which are $0<\beta_1<1$, $0<\alpha_1<1$ and $\alpha_1+\beta_1<1$. Hence, these findings show the presence of time varying conditional volatility for ERIX returns while indicating a high persistence of volatility shocks, which is represented by the high $\alpha_1+\beta_1=0.975$. It depicts that the effect of today's shock remains in the forecast of variance for many periods in the future.
+
+When considering the **GJR-GARCH model**, the mean equation and the GARCH equation both show positive and significant parameters at 1% confidence interval level. The coefficient of the asymmetric term $(\gamma_1=0.075)$ is positive and significant at the 1% level. It shows that negative shocks have a larger impact on volatility than positive shocks of the same magnitude which shows asymmetry which shows the levergae effect. The difference between the positive and negative shocks in the log-returns is 0.075 which is the coefficient of the asymmetry effect. In this model negative shocks will have a larger effect than positive effects if the $\beta_1+\gamma_1>\beta_1$ which is true for the case of this. We can conclude that modelling of information, news or events that affect the index have a significant effect on the ERIX return volatility. There is also a high persistence in volatility shocks since the $\beta_1+\alpha_1+\frac{\gamma_1}{2}<1$.
+
+When considering the **EGARCH model**, the mean equation and the GARCH equation both show positive and significant parameters at 1% confidence interval level. The coefficient of the asymmetric term $(\gamma_1=0.184)$ is positive and significant at the 1% level. This states that the positive shocks have a higher effect on volatility than negative shocks which is contradictory to the data exploration done in section 1. Although there are no restrictions, if the $|\beta|<1$ the model is said to be stationary and have a finite kurtosis where the model at hand follows [@nelson_conditional_1991]. As mentioned by @nelson_conditional_1991, the $g(z)$ should be a negative which is $(\gamma)$ in order for the model to account for asymmetry in the data. While it is unexpected to get a positive coefficient, it could still be possible according to @alexander_market_2009.
+
+```{r include=FALSE}
+erix_ret <- na.omit(erix_ret)
+smplsize_e <- length(erix_ret)
+
+#GARCH(1,1) for ERIX
+garch1_spec <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+garch1.fit <- ugarchfit(erix_ret[1:smplsize_e], spec = garch1_spec, solver = "hybrid", out.sample=0)
+
+#GJR-GARCH(1,1) for ERIX
+gjr_garch1_spec <- ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+gjr_garch1.fit <- ugarchfit(erix_ret[1:smplsize_e], spec = gjr_garch1_spec, solver = "hybrid", out.sample=0)
+
+#EGARCH(1,1) for ERIX
+e_garch1_spec <- ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1)), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+e_garch1.fit <- ugarchfit(erix_ret[1:smplsize_e], spec = e_garch1_spec, solver = "hybrid", out.sample=0)
+
+spg_ret <- na.omit(spg_ret)
+smplsize_s <- length(spg_ret)
+
+#GARCH(1,1) for SPG
+garch1_spec <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+garch1.fit.spg <- ugarchfit(spg_ret[1:smplsize_s], spec = garch1_spec, solver = "hybrid", out.sample=0)
+
+#GJR-GARCH(1,1) for SPG
+gjr_garch1_spec <- ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+gjr_garch1.fit.spg <- ugarchfit(spg_ret[1:smplsize_s], spec = gjr_garch1_spec, solver = "hybrid", out.sample=0)
+
+#EGARCH(1,1) for SPG
+e_garch1_spec <- ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1)), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+e_garch1.fit.spg <- ugarchfit(spg_ret[1:smplsize_s], spec = e_garch1_spec, solver = "hybrid", out.sample=0)
+
+infocriteria(garch1.fit.spg)
+infocriteria(gjr_garch1.fit.spg)
+infocriteria(e_garch1.fit.spg)
+
+garch1.fit
+gjr_garch1.fit
+e_garch1.fit
+garch1.fit.spg
+gjr_garch1.fit.spg
+e_garch1.fit.spg
+
+#Model diagnostics
+
+#garch1.fit
+garch1.fit.st.resid <- residuals(garch1.fit, standardize=TRUE)
+garch1.fit.st.resid <- ts(garch1.fit.st.resid)
+plot(garch1.fit.st.resid)
+Box.test(garch1.fit.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(garch1.fit.st.resid^2,lag=10,type='Ljung') # squared standardized resids
+
+#e_garch1.fit
+e_garch1.fit.st.resid <- residuals(e_garch1.fit, standardize=TRUE)
+e_garch1.fit.st.resid <- ts(e_garch1.fit.st.resid)
+plot(e_garch1.fit.st.resid)
+Box.test(e_garch1.fit.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(e_garch1.fit.st.resid^2,lag=10,type='Ljung') # squared standardized resids
+
+#gjr_garch1.fit
+gjr_garch1.fit.st.resid <- residuals(gjr_garch1.fit, standardize=TRUE)
+gjr_garch1.fit.st.resid <- ts(gjr_garch1.fit.st.resid)
+plot(gjr_garch1.fit.st.resid)
+Box.test(gjr_garch1.fit.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(gjr_garch1.fit.st.resid^2,lag=10,type='Ljung') # squared standardized resids
+
+#garch1.fit.spg
+garch1.fit.spg.st.resid <- residuals(garch1.fit.spg, standardize=TRUE)
+garch1.fit.spg.st.resid <- ts(garch1.fit.spg.st.resid)
+plot(garch1.fit.spg.st.resid)
+Box.test(garch1.fit.spg.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(garch1.fit.spg.st.resid^2,lag=10,type='Ljung') # squared standardized resids
+
+#gjr_garch1.fit.spg
+gjr_garch1.fit.spg.st.resid <- residuals(gjr_garch1.fit.spg, standardize=TRUE)
+gjr_garch1.fit.spg.st.resid <- ts(gjr_garch1.fit.spg.st.resid)
+plot(gjr_garch1.fit.spg.st.resid)
+Box.test(gjr_garch1.fit.spg.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(gjr_garch1.fit.spg.st.resid^2,lag=10,type='Ljung') # squared standardized resids
+
+#e_garch1.fit.spg
+e_garch1.fit.spg.st.resid <- residuals(e_garch1.fit.spg, standardize=TRUE)
+e_garch1.fit.spg.st.resid <- ts(e_garch1.fit.spg.st.resid)
+plot(e_garch1.fit.spg.st.resid)
+Box.test(e_garch1.fit.spg.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(e_garch1.fit.spg.st.resid^2,lag=10,type='Ljung') # squared standardized resids
+```
+
+```{r Table, echo=F, warning=FALSE}
+temp.df = data.frame(image="![](Model estimates.png)")
+temp.mat <- as.matrix(temp.df)
+colnames(temp.mat) <- NULL
+knitr::kable(temp.mat, caption="Model estimates for both daily returns", format="pandoc")
+```
+
+Although in an analysis using R according to @R_manual it is noted in section 2.2.3 that $\alpha_1$ in the model follows the sign leverage effect and $\gamma_1$ only follows the size leverage effect. This is evident by the equation \@ref(eq:4) mentioned above where the $\alpha_j$ and $\gamma_j$ combined will show the leverage effect. In this case, the ERIX index shows leverage effect($-\alpha_j\times\gamma_j$) where the negative shocks will have a higher effect on volatility than positive shocks.
+
+### Estimated result analysis for SPG index
+
+For SPG returns Refer table \@ref(tab:Table), all the model parameters are are highly significant in all 3 models where the AIC information criterion are less than 4 for all where GJR-GARCH and EGARCH seems to be the best fits for the log-returns due to its ability to account for asymmetry in the data which we observed in the exploratory data analysis part. When taking the **GARCH model** into account of the conditional variance terms $(\omega, \alpha_1, \beta_1)$, all the GARCH and ARCH parameters are positive and statistically significant at the 1% confidence level. Additionally, all the coefficients of the conditional variance specification meet the stability conditions which are $0<\beta_1<1$, $0<\alpha_1<1$ and $\alpha_1+\beta_1<1$. Hence, these findings show the presence of time varying conditional volatility for ERIX returns while indicating a high persistence of volatility shocks, which is represented by the high $\alpha_1+\beta_1=0.992$. It depicts that the effect of today's shock remains in the forecast of variance for many periods in the future.
+
+When considering the **GJR-GARCH model**, the mean equation and the GARCH equation both show positive and significant parameters at 1% confidence interval level. The coefficient of the asymmetric term $(\gamma_1=0.046)$ is positive and significant at the 5% level. It shows that negative shocks have a larger impact on volatility than positive shocks of the same magnitude which shows asymmetry which shows the leverage effect. The difference between the positive and negative shocks in the log-returns is 0.046 which is the coefficient of the asymmetry effect. In this model negative shocks will have a larger effect than positive effects if the $\beta_1+\gamma_1>\beta_1$ which is true for the case of this. We can conclude that modelling of information, news or events that affect the index have a significant effect on the SPG return volatility. There is also a high persistence in volatility shocks since the $\beta_1+\alpha_1+\frac{\gamma_1}{2}<1$.
+
+When considering the **EGARCH model**, the mean equation and the GARCH equation both show positive and significant parameters at 1% confidence interval level. The coefficient of the asymmetric term $(\gamma_1=0.199)$ is positive and significant at the 1% level. As mentioned above, the sign of the $\gamma$ seems to be unexpected. Although as mentioned before when the analysis is done in R, according to @R_manual it is noted in section 2.2.3 that $\alpha_1$ in the model follows the sign leverage effect and $\gamma_1$ only follows the size leverage effect. This is evident by the equation \@ref(eq:4) mentioned above where the $\alpha_j$ and $\gamma_j$ combined will show the leverage effect. In this case, the SPG index shows leverage effect($-\alpha_j\times\gamma_j$) where the negative shocks will have a higher effect on volatility than positive shocks.
+
+Furthermore, when we analyse the news impact curves of the 4 models with the extended GARCH models that capture asymmetry(refer to figure \@ref(fig:fig3))\footnote{The top row are the news impact curves of ERIX index and bottom row shows the news impact curves of SPG index}, we clearly see that there is asymmetry effect in both models as we confirmed by the coefficient analysis earlier.
+
+```{r fig3, echo=FALSE, out.width = "90%", fig.align = "center", fig.cap='News impact curves for the extended GARCH models'}
+par(mfrow=c(2,2))
+plot(gjr_garch1.fit, which=12)
+plot(e_garch1.fit, which=12)
+plot(gjr_garch1.fit.spg, which=12)
+plot(e_garch1.fit.spg, which=12)
+```
+
+## Shortcomings and advantages of the models
+
+The model advantages and disadvantages are summarized in Table \@ref(tab:Table1). The **GARCH** models include many advantages which includes capturing of changing variances, volatility clustering and pooling and heavy-tailedness. Although, the model does not capture the asymmetry and leverage effect correlation which is the correlation between the daily returns and its one step future volatility and the model is prone to have negative value for the volatility which is in reality impossible and is a weakness of the model. In order to account for those mentioned above we can use the **EGARCH** and **GJR-GARCH** models. While these models account for all the effects of the above mentioned financial data series characteristics, the models are more complex than the GARCH model which includes more parameters to account for asymmetry and leverage effects. Furthermore, the **EGARCH** and **GJR-GARCH** models are less efficient than the GARCH models where GJR-GARCH is the least efficient out of all 3 models. Furthermore, the EGARCH model is not subject to the non-negativity constrains as we use the $log_e(\sigma^2_t)$, it is impossible for the value to be negative. 
+
+```{r Table1, echo=F, warning=FALSE}
+temp.df = data.frame(image="![](Ad-Dis.png)")
+temp.mat <- as.matrix(temp.df)
+colnames(temp.mat) <- NULL
+knitr::kable(temp.mat, caption="Shortcomings and Advantages of models", format="pandoc")
+```
+
+```{r eval=FALSE, include=FALSE}
+#Breaks in ERIX
+breakpoints_erix <- c(532, 1291, 1361, 1502, 3246, 4284)
+
+dummy_matrix <- matrix(0, nrow = length(erix_ret), ncol = length(breakpoints_erix))
+
+# Loop through breakpoints and create dummy variables
+for (i in 1:length(breakpoints_erix)) {
+  dummy_matrix[, i] <- as.numeric(seq_along(erix_ret) >= breakpoints_erix[i])
+}
+
+e_garch1_spec.break <- ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1), external.regressors = dummy_matrix), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+e_garch1.fit.break <- ugarchfit(erix_ret[1:smplsize_e], spec = e_garch1_spec.break, solver = "hybrid", out.sample=0)
+
+e_garch1.fit.break@fit$persistence
+
+#Breaks in SPG
+breakpoints_spg <- c(143, 461, 966, 1251, 1317, 1421, 1728, 2006, 2093, 2504, 3025, 3289, 4237)
+
+dummy_matrix_spg <- matrix(0, nrow = length(spg_ret), ncol = length(breakpoints_spg))
+
+# Loop through breakpoints and create dummy variables
+for (i in 1:length(breakpoints_spg)) {
+  dummy_matrix_spg[, i] <- as.numeric(seq_along(spg_ret) >= breakpoints_spg[i])
+}
+
+e_garch1_spec.break.spg <- ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1), external.regressors = dummy_matrix_spg), mean.model = list(armaOrder = c(1,0), include.mean = TRUE), distribution.model = "norm")
+
+e_garch1.fit.break.spg <- ugarchfit(spg_ret, spec = e_garch1_spec.break.spg, solver = "hybrid", out.sample=0)
+
+e_garch1.fit.break.spg@fit$persistence
+
+#Residual test ERIX
+e_garch1.fit.break.st.resid <- residuals(e_garch1.fit.break, standardize=TRUE)
+e_garch1.fit.break.st.resid <- ts(e_garch1.fit.break.st.resid)
+plot(e_garch1.fit.break.st.resid)
+Box.test(e_garch1.fit.break.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(e_garch1.fit.break.st.resid^2,lag=10,type='Ljung')
+
+#Residual test SPG
+e_garch1.fit.break.spg.st.resid <- residuals(e_garch1.fit.break.spg, standardize=TRUE)
+e_garch1.fit.break.spg.st.resid <- ts(e_garch1.fit.break.spg.st.resid)
+plot(e_garch1.fit.break.spg.st.resid)
+Box.test(e_garch1.fit.break.spg.st.resid,lag=10,type='Ljung') # standardized residuals
+Box.test(e_garch1.fit.break.spg.st.resid^2,lag=10,type='Ljung')
+```
+
+\newpage
+
+# Model estimation incorporating breaks
+
+The estimated models which incorporates breaks can be seen in table \@ref(tab:Table2). The models are compared with the EGARCH models that do not incorporate the breaks. 
+
+## Estimated results analysis for EGARCH(1,1) break incorporated models
+
+In both models (Refer Table \@ref(tab:Table2)), the mean coefficients take a positive value and is significant at the 1% level of confidence which is highly significant for both ERIX and SPG. For the variance equations, both models include $\alpha_1$, $\beta_1$ and the $\gamma_1$ which are the ARCH, GARCH and asymmetry coefficients. We see a negative $\alpha_1$ for both models and a positive $\gamma_1$ and $\beta_1$ for both models which are significant at the 1% level of confidence. Although there are no restrictions, if the $|\beta|<1$ the model is said to be stationary and have a finite kurtosis which the model at hand follows [@nelson_conditional_1991]. As mentioned before, according to @R_manual it is noted in section 2.2.3 that $\alpha_1$ in the model follows the sign leverage effect and $\gamma_1$ only follows the size leverage effect\footnote{The $\alpha_j$ and $\gamma_j$ is taken together to calculate the leverage effect.(Refer to equation 4)}. In this case, the both indices shows leverage effect where the negative shocks will have a higher effect on volatility than positive shocks. In this case the $\gamma$ has reduced in both models which show that the breaks capture some of the asymmetry in the models and include it in the model where subsequently will reduce volatility(Further analysis will be done analyzing the volatility persistence). 
+
+When talking about the break dummies in the models, we can see that the ERIX model has 6 break dummies $(D_i)$ and the SPG return has 13. Typically we will expect the break dummies to be positive. This means that the conditional variance will be higher after the break point than before the break point. This is because a break point indicates a negative change in the underlying economic conditions, that leads to increased volatility. The break dummy coefficients can also be negative, Although less common negative coefficient would indicate that the conditional variance is lower after the break point than before the break point. This could happen if there is a policy change that reduces uncertainty, such as a central bank lowering interest rates. The $D_i<0$ indicates that the volatility decreases after the structural break and a $D_i>0$ indicates that the volatility increases after the structural break. When considering the model for ERIX daily returns, all the coefficients are significant at the 1% confidence level and 3 of the dummies are positive and 3 of the dummies are negative. Although it is not what we exactly expect from the dummy variables, we can see the total effect on volatility through the volatility persistence of the model which is measured by the $\beta_1$ of the model. In the SPG model 7 dummies$(D_1,D_5,D_6,D_7,D_9,D_{10}, D_{12})$ out of the 13 take the negative sign and $D_{10}$ and $D_{11}$ is only significant at the 5% level whereas the others are significant at the 1% confidence level. (Refer to Table \@ref(tab:Table2) in the next page).
+
+## Volatility persistence and model fit
+
+In order to interpret the **volatility persistence** we need to compare the $\beta_1$ values of all the models and is also included in the "**Volatility Persistence**" row of the table \@ref(tab:Table2). It can clearly be seen that the volatility persistence for both ERIX and SPG daily log-returns in EGARCH of break dummies have decreased from the regular EGARCH model(**ERIX: 0.969>0.889; SPG: 0.985>0.872**). It can be seen from the value, that the model with the highest amount of breakpoints have reduced the persistence by the highest value. This shows that the models with dummy breaks have reduced the volatility persistence of the model which depicts that the effect of today's shock remains in the forecast of variance for many periods in the future is less in the break-point incorporated model.
+
+When considering model diagnostics, the standard residuals are tested using the ljung-box test where the p-values are mentioned in table \@ref(tab:Table2) as $Q(10)$ and $Q^2(10)$. The model passes the model adequacy tests since the diagnostics for both models show that the p-values are >0.05 and we cannot reject the null hypothesis of that the $\rho_i$ (where $1\leq i \leq10$) are significant for model residuals and squared model residuals. Hence we can say that the model passes the adequacy tests and do not show spurious effects.
+
+Comparing the model fit using the information criterion(AIC, BIC), it is clear that the break dummy incorporated models are a better fit than the regular EGARCH models. For ERIX daily log-returns, the AIC reduces from 3.73 to 3.71 and for SPG daily log-returns, the AIC reduces from 3.41 to 3.38 showing that both **EGARCH(1,1) break incorporated models are a better fit for data than the regular EGARCH models**.
+
+```{r Table2, echo=F, warning=FALSE, out.width="80%"}
+temp.df = data.frame(image="![](Model-breaks.png)")
+temp.mat <- as.matrix(temp.df)
+colnames(temp.mat) <- NULL
+knitr::kable(temp.mat, caption="Estimated EGARCH(1,1) Models with breaks comparison", format="pandoc")
+```
+
+# Conclusion
+
+## Best fit model and its effectiveness
+
+We tried to find the best model fit to explain the volatility and asymmetry that arises in the daily series of ERIX daily log-returns and SPG daily log-returns. We ran AR(1)-GARCH(1,1) and its extensions AR(1)-EGARCH(1,1) and AR(1)-GJR-GARCH(1,1).
+
+Referring back to section 1, the data shows that the GARCH-type models are the best fit to model the data as the data includes volatility clustering, asymmetry and heavy-tailedness of the data than the ARCH model which cannot explain the above mentioned characteristics. Referring back to table \@ref(tab:Table) which contains the estimates of the first models show that EGARCH and GJR-GARCH models are a better fit for the data than the GARCH model itself. Furthermore, after including the breakpoints in the EGARCH model we can see that the **best model for both data series is the break point incorporated EGARCH(1,1) models**.(We compared the models using the information criterion refer to table \@ref(tab:Table) and table \@ref(tab:Table2)).
+
+## Roles of breaks in the models and implications of the study
+
+The role of breaks in the model is to reduce the volatility persistence(the effect of today's shock remains in the forecast of variance for many periods in the future) of the models as mentioned before in section 3. As mentioned in our study, the break dummies are very significant and does have positive results on reducing the volatility persistence for ERIX and SPG daily log-returns and asymmetry effect on the data.
+
+Continuing into the implications of the study, the main purpose of the study is to find the best model fit which would have positive effects on forecasting future volatility in the returns of ERIX and SPG. The study finds that EGARCH model with incorporated breaks as the best model for the fit of the data which means that it is important to model for both volatility and asymmetry(leverage effect) if we want to forecast the future volatility of the returns of both ERIX and SPG.
+
+The study in addition shows that the SPG returns are is less volatile than ERIX returns which would help in decisions for risk diversion in an investment portfolio. It will also lead to more accurate future forecasts for both ERIX and SPG returns. 
+
+\newpage
+# References
+
+
+
+
